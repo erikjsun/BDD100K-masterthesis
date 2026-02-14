@@ -489,13 +489,74 @@ Mean Average Precision (mAP) on PASCAL VOC validation set, following standard ob
 | Channel Splitting | Enabled | Disabled |
 | Training Iterations | 200k | ~30 epochs |
 
-### 10.3 Next Steps (BDD100K)
+### 10.3 BDD100K Integration (Implemented)
 
-1. Download and analyze BDD100K dataset format
-2. Adapt `data_prep.py` for driving video structure
-3. Handle higher resolution (720p vs 320×240)
-4. Adjust preprocessing parameters for driving scenes
-5. Train and compare with UCF-101 baseline
+The BDD100K integration adapts the validated UCF-101 pipeline to the Berkeley DeepDrive 100K autonomous driving dataset. The UCF-101 pipeline is preserved as-is for baseline comparison.
+
+#### 10.3.1 BDD100K Dataset Characteristics
+
+| Property | UCF-101 | BDD100K | Implication |
+|----------|---------|---------|-------------|
+| Resolution | 320×240 | 1280×720 (720p) | Downscale before processing |
+| Frame Rate | 25 FPS | 30 FPS | Higher frame decimation needed |
+| Duration | ~7 sec avg | ~40 sec | 6.6× more frames per video |
+| Format | `.avi` (DivX) | `.mov` (H.264) | Different codec handling |
+| Directory | Class-based folders | Flat `train/val/test` | No action class labels |
+| Total Videos | 13,320 | 100,000 | 7.5× more data |
+| Domain | Human actions | Driving scenes | Different motion patterns |
+
+#### 10.3.2 Preprocessing Adaptations
+
+The BDD100K pipeline (`data_prep_bdd100k.py`) makes the following adjustments:
+
+1. **Frame Decimation**: Every 3rd frame (30fps → ~10fps) vs every 2nd frame for UCF-101. Driving videos at 30fps have even higher temporal redundancy than action videos.
+
+2. **Resolution Downscaling**: Frames are downscaled to 640×360 before patch selection and optical flow computation. This is necessary because:
+   - 720p optical flow computation is ~16× slower than 320×240
+   - The 160×160 patch extraction at 720p would capture a very small portion of the frame
+   - 640×360 maintains sufficient detail while being computationally tractable
+
+3. **Optical Flow Downscaling**: Further downscaled to 320×180 for the Farneback optical flow used in frame selection weights (separate from the patch selection flow).
+
+4. **Margin**: Increased from 30px to 60px to account for dashcam lens distortion at frame edges and the higher resolution working space (640×360).
+
+5. **Spatial Jitter**: Increased from ±20px to ±40px proportional to the larger working resolution. The constraint `jitter < margin` is maintained (40 < 60).
+
+6. **Video Reading**: Handles `.mov` format with rotation metadata correction. Many BDD100K dashcam videos contain `rotate:270` metadata from smartphone recording orientation.
+
+7. **No Action Labels**: BDD100K videos don't have action class labels. The `action_label` field in the 8-tuple output is set to -1. The self-supervised frame ordering task is label-agnostic.
+
+#### 10.3.3 Architecture
+
+The model architecture (`model.py`) requires **no changes**. The COPN model processes 4×160×160 patches regardless of the source video's original resolution or domain. This is a key advantage of the patch-based approach.
+
+#### 10.3.4 Training Pipeline
+
+`bdd100k_main.py` mirrors `main.py` with BDD100K-specific configuration:
+- Reads from `bdd100k-preprocessed-data/` folder in Azure
+- Uses separate local cache directory (`local_cache_bdd100k/`)
+- Saves model snapshots to `saved/bdd100k_modelsnapshots/`
+- Same optimizer (Adam, lr=0.0003) and scheduler (MultiStepLR) for fair comparison
+
+#### 10.3.5 Expected Differences from UCF-101
+
+- **Motion patterns**: Driving scenes have more predictable motion (forward movement, lane changes) compared to diverse human actions. The frame ordering task may be easier or harder depending on how distinctive temporal cues are in driving.
+- **Static backgrounds**: Highway driving may have large static sky/road regions, making motion-aware patch selection particularly important.
+- **Scale**: 100K videos vs 13K provides significantly more training data, which may improve learned representations despite the narrower domain.
+
+#### 10.3.6 Execution Order
+
+```
+1. python data_prep_bdd100k.py    # Preprocess BDD100K videos → .pth files in Azure
+2. python bdd100k_main.py         # Train COPN on BDD100K preprocessed data
+```
+
+### 10.4 Remaining Future Work
+
+1. **Channel Splitting Stabilization**: Debug training instability when enabled
+2. **GPU Training**: Migrate to GPU-enabled environment for faster iteration
+3. **Cross-domain Transfer**: Compare UCF-101 pretrained vs BDD100K pretrained representations
+4. **BDD100K Fine-tuning Evaluation**: Adapt PASCAL VOC fine-tuning scripts or evaluate on BDD100K detection task
 
 ---
 
@@ -504,13 +565,15 @@ Mean Average Precision (mAP) on PASCAL VOC validation set, following standard ob
 | File | Lines | Purpose |
 |------|-------|---------|
 | `model.py` | 78 | COPN architecture definition |
-| `data_prep.py` | 683 | Preprocessing pipeline + Azure integration |
-| `main.py` | 397 | Training loop + validation |
+| `data_prep.py` | 683 | UCF-101 preprocessing pipeline + Azure integration |
+| `data_prep_bdd100k.py` | ~350 | BDD100K preprocessing pipeline + Azure integration |
+| `main.py` | 397 | UCF-101 training loop + validation |
+| `bdd100k_main.py` | ~280 | BDD100K training loop + validation |
 | `finetune_copn_pascal.py` | 269 | Transfer learning with pretraining |
 | `finetune_copn_pascal-no-pretraining.py` | 252 | Transfer learning baseline |
-| `config.json` | 23 | Configuration parameters |
+| `config.json` | ~50 | Configuration parameters (UCF-101 + BDD100K) |
 | `test_caching.py` | 93 | Cache performance validation |
-| **Total** | **~1,800** | — |
+| **Total** | **~2,450** | — |
 
 ---
 
@@ -518,14 +581,20 @@ Mean Average Precision (mAP) on PASCAL VOC validation set, following standard ob
 
 All code is available at: `github.com/erikjsun/OPN-masterthesis`
 
-To reproduce:
+### UCF-101 Pipeline
 1. Clone repository
 2. Configure `.env` with Azure credentials
 3. Run `python data_prep.py` (preprocessing)
 4. Run `python main.py` (training)
 
+### BDD100K Pipeline
+1. Upload BDD100K videos to Azure Blob Storage under `bdd100k/videos/{train,val,test}/`
+2. Configure `.env` with Azure credentials
+3. Run `python data_prep_bdd100k.py` (preprocessing)
+4. Run `python bdd100k_main.py` (training)
+
 Environment: Python 3.10, PyTorch 2.1.1, see `requirements.txt` for full dependencies.
 
 ---
 
-*Document generated from git commit history analysis, January 2026*
+*Document updated February 2026 — BDD100K integration added*

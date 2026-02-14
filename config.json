@@ -6,12 +6,41 @@
             "folder_limit": 101
         }
     },
+    "data_prep_bdd100k": {
+        "data": {
+            "preprocessed_folder": "bdd100k-preprocessed-data",
+            "batch_size": 5,
+            "video_limit": null,
+            "split": "train"
+        },
+        "preprocessing": {
+            "patch_size": 160,
+            "frame_decimation": 3,
+            "optical_flow_downscale": [320, 180],
+            "margin": 60,
+            "spatial_jitter": 40,
+            "downscale_before_patch": [640, 360]
+        }
+    },
     "main": {
         "paths": {
             "preprocessed_folder": "ucf-preprocessed-data-500",
             "dataset_train": "dataset_train.pth",
             "model_save": "./saved/model_weights.pth",
             "plot_save": "./saved/plot.png"
+        },
+        "training": {
+            "epochs": 30,
+            "chunk_size": 1,
+            "batch_size": 32,
+            "num_workers": 1
+        }
+    },
+    "main_bdd100k": {
+        "paths": {
+            "preprocessed_folder": "bdd100k-preprocessed-data",
+            "model_save": "./saved/bdd100k_model_weights.pth",
+            "plot_save": "./saved/bdd100k_plot.png"
         },
         "training": {
             "epochs": 30,
